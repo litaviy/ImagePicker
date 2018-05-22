@@ -7,6 +7,12 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.support.v4.content.FileProvider
 import android.support.v7.app.AppCompatActivity
+import android.view.View
+import android.widget.Toast
+import io.reactivex.Single
+import io.reactivex.android.schedulers.AndroidSchedulers
+import io.reactivex.disposables.CompositeDisposable
+import io.reactivex.schedulers.Schedulers
 import kotlinx.android.synthetic.main.activity_main.*
 import kotlinx.android.synthetic.main.content_main.*
 import java.io.File
@@ -28,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private val STORAGE_IMAGE_GET = 4
     private val STORAGE_IMAGE_MIME_TYPE = "image/*"
 
+    private val compositeDisposable = CompositeDisposable()
 
     private var currentPhotoPath: String? = null
 
@@ -43,21 +50,41 @@ class MainActivity : AppCompatActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (resultCode == Activity.RESULT_OK) {
+            mainImage.setImageResource(0)
             when (requestCode) {
                 CAMERA_IMAGE_CAPTURE -> {
-                    val image = BitmapUtils().getBitmapFromFile(
-                            contentResolver, currentPhotoPath ?: "", RES_1080
-                    )
-                    mainImage.setImageBitmap(image)
+                    mainProgress.visibility = View.VISIBLE
+                    compositeDisposable.add(BitmapUtils().getBitmapFromFile(contentResolver, currentPhotoPath
+                            ?: "", RES_1080)
+                            .subscribeOn(Schedulers.io())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .doAfterTerminate { mainProgress.visibility = View.GONE }
+                            .subscribe({ image ->
+                                mainImage.setImageBitmap(image)
+                            }, { throwable ->
+                                throwable.printStackTrace()
+                                Toast.makeText(this@MainActivity, throwable.message, Toast.LENGTH_LONG).show()
+                            }))
                 }
                 STORAGE_IMAGE_GET -> {
                     data?.let {
-                        val imageFile = createImageFile(
-                                imageFileName = getImageFileName(),
-                                imageFilePath = getExternalFilesDir(Environment.DIRECTORY_PICTURES).absolutePath
-                        )
-                        val image = BitmapUtils().getBitmapFromUri(contentResolver, it.data, imageFile, RES_1080)
-                        image?.let { mainImage.setImageBitmap(image) }
+                        mainProgress.visibility = View.VISIBLE
+                        compositeDisposable.add(
+                                Single.fromCallable {
+                                    return@fromCallable createImageFile(
+                                            imageFileName = getImageFileName(),
+                                            imageFilePath = getExternalFilesDir(Environment.DIRECTORY_PICTURES).absolutePath
+                                    )
+                                }.flatMap { file -> BitmapUtils().getBitmapFromUri(contentResolver, it.data, file, RES_1080) }
+                                        .subscribeOn(Schedulers.io())
+                                        .observeOn(AndroidSchedulers.mainThread())
+                                        .doAfterTerminate { mainProgress.visibility = View.GONE }
+                                        .subscribe({ image ->
+                                            mainImage.setImageBitmap(image)
+                                        }, { throwable ->
+                                            throwable.printStackTrace()
+                                            Toast.makeText(this@MainActivity, throwable.message, Toast.LENGTH_LONG).show()
+                                        }))
                     }
                 }
             }

@@ -5,57 +5,46 @@ import android.graphics.*
 import android.media.ExifInterface
 import android.net.Uri
 import android.provider.MediaStore
-import java.io.*
+import io.reactivex.Single
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
 
 /**
  * Created by klitaviy on 5/21/18-12:22 PM.
  */
 open class BitmapUtils {
 
-    fun getBitmapFromUri(contentResolver: ContentResolver, uri: Uri, target: File, targetWidth: Int): Bitmap? {
-        var inputStream: InputStream? = null
-        var outputStream: FileOutputStream? = null
-        var bitmap: Bitmap? = null
-        try {
+    fun getBitmapFromUri(contentResolver: ContentResolver, uri: Uri, target: File, targetWidth: Int): Single<Bitmap> =
+            Single.fromCallable {
+                var inputStream: InputStream = contentResolver.openInputStream(uri)
+                val outputStream: FileOutputStream = FileOutputStream(target)
 
-            inputStream = contentResolver.openInputStream(uri)
-            outputStream = FileOutputStream(target)
+                val options = BitmapFactory.Options()
+                options.inJustDecodeBounds = true
+                BitmapFactory.decodeStream(inputStream, null, options)
 
-            val options = BitmapFactory.Options()
-            options.inJustDecodeBounds = true
-            BitmapFactory.decodeStream(inputStream, null, options)
+                options.inSampleSize = calculateInSampleSize(options, options.outWidth, options.outHeight)
+                options.inJustDecodeBounds = false
+                options.inTempStorage = ByteArray(16 * 1024)
 
-            options.inSampleSize = calculateInSampleSize(options, options.outWidth, options.outHeight)
-            options.inJustDecodeBounds = false
-            options.inTempStorage = ByteArray(16 * 1024)
+                inputStream = contentResolver.openInputStream(uri)
+                val bitmap: Bitmap = BitmapFactory.decodeStream(inputStream, null, options)
 
-            inputStream = contentResolver.openInputStream(uri)
-            bitmap = BitmapFactory.decodeStream(inputStream, null, options)
-        } catch (e: FileNotFoundException) {
-            e.printStackTrace()
-        } catch (e: IOException) {
-            e.printStackTrace()
-        } catch (e: OutOfMemoryError) {
-            e.printStackTrace()
-        } finally {
-            outputStream?.flush()
-            outputStream?.close()
-            inputStream?.close()
-        }
+                outputStream.flush()
+                outputStream.close()
+                inputStream.close()
 
-        return if (bitmap != null) {
-            optimizeBitmap(bitmap, target.absolutePath, targetWidth)
-        } else {
-            null
-        }
-    }
+                return@fromCallable optimizeBitmap(bitmap, target.absolutePath, targetWidth)
+            }
 
-    fun getBitmapFromFile(contentResolver: ContentResolver, filePath: String, targetWidth: Int): Bitmap {
-        val imageFile = File(filePath)
-        val sourceBitmap = MediaStore.Images.Media.getBitmap(contentResolver, Uri.fromFile(imageFile))
+    fun getBitmapFromFile(contentResolver: ContentResolver, filePath: String, targetWidth: Int): Single<Bitmap> =
+            Single.fromCallable {
+                val imageFile = File(filePath)
+                val sourceBitmap = MediaStore.Images.Media.getBitmap(contentResolver, Uri.fromFile(imageFile))
 
-        return optimizeBitmap(sourceBitmap, filePath, targetWidth)
-    }
+                return@fromCallable optimizeBitmap(sourceBitmap, filePath, targetWidth)
+            }
 
     private fun calculateInSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
         val height = options.outHeight
